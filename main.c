@@ -18,6 +18,7 @@ void SendCommands(char *buffer );
 int readFontData(fontValue fontData[]);
 int readTextData(char textData[]);
 int calculateScaleFactor(float *scaleFactor);
+int mapTextToFontData(char textData[], fontValue fontData[], fontValue* textFontData[]);
 
 int main()
 {
@@ -27,6 +28,7 @@ int main()
     fontValue fontData[NumberOfLines];
     char textData[256];
     float scaleFactor;
+    fontValue* textFontData[1024];
 
     // Load font data 
     if (readFontData(fontData)) 
@@ -50,6 +52,17 @@ int main()
     }
 
     printf("Scale factor calculated: %.2f\n", scaleFactor);
+
+    // Map the text data to font data
+    if (mapTextToFontData(textData, fontData, textFontData)) 
+    {
+        printf("Error: Failed to map text data to font data.\n");
+        return 1;
+    }
+
+    printf("Text data mapped to font data successfully.\n");
+
+    return 0;
 
     // If we cannot open the port then give up immediately
     if ( CanRS232PortBeOpened() == -1 )
@@ -190,7 +203,7 @@ int calculateScaleFactor(float *scaleFactor)
     return 0;
 }
 
-int mapTextToFontData(char textData[], fontValue fontData[], int *textFontData[]) {
+int mapTextToFontData(char textData[], fontValue fontData[], fontValue *textFontData[]) {
     int i, j;
     int ascii;  // ASCII value of the character
     int lines = 0; // To track the number of lines for a character's font data
