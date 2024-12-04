@@ -163,7 +163,7 @@ int readFontData(fontValue fontData[])
 
 int readTextData(char textData[])
 {
-    FILE *textDataFile = fopen("TextData.txt","r");
+    FILE *textDataFile = fopen("test.txt","r");
 
     if (textDataFile == NULL) 
     {
