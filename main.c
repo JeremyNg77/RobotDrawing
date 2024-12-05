@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
-//#include <conio.h>
-//#include <windows.h>
+#include <conio.h>
+#include <windows.h>
 #include "rs232.h"
 #include "serial.h"
 
@@ -19,6 +19,7 @@ int readFontData(fontValue fontData[]);
 int readTextData(char textData[]);
 int calculateScaleFactor(float *scaleFactor);
 int mapTextToFontData(char textData[], fontValue fontData[], fontValue* textFontData[]);
+int generateGCode(int textFontData[], float scaleFactor, char *gCodeCommand[]);
 
 int main()
 {
@@ -63,6 +64,26 @@ int main()
     printf("Text data mapped to font data successfully.\n");
 
     return 0;
+
+    char *gCodeCommand[1024];  // Array to hold G-code strings
+    for (int i = 0; i < 1024; i++) 
+    {
+        gCodeCommand[i] = malloc(100);  // Dynamic memory allocation for each G-code line
+    }
+
+    // Generate G-codes
+    if (generateGCode(textFontData, scaleFactor, gCodeCommand)) 
+    {
+        printf("Error: Failed to generate G-code.\n");
+        return 1;
+    }
+
+    // Send G-codes to the robot
+    for (int i = 0; gCodeCommand[i] != NULL; i++) 
+    {
+        SendCommands(gCodeCommand[i]);
+        free(gCodeCommand[i]);  // Free allocated memory
+    }
 
     // If we cannot open the port then give up immediately
     if ( CanRS232PortBeOpened() == -1 )
@@ -235,4 +256,56 @@ int mapTextToFontData(char textData[], fontValue fontData[], fontValue *textFont
     }
 
     return 0; // Success
+}
+
+int generateGCode(fontValue* textFontData[], float scaleFactor, char *gCodeCommand[])
+{
+    int gCodeIndex = 0;
+    int xOffset = 0;
+    int yOffset = 0;
+    int charSpace = 10;
+    int lineSpace = 15;
+
+    int i = 0;
+
+    while (textFontData[i] != -1)
+    {
+        int xValue = textFontData[i];
+        int yValue = textFontData[i+1];
+        int penStatus = textFontData[i+2];
+        i = i + 3;
+
+        int xScaled = (int)(xValue*scaleFactor)+xOffset;
+        int yScaled = (int)(yValue*scaleFactor)+yOffset;
+
+        if (penStatus == 0) // Pen up
+        {
+            sprintf(gCodeCommand[gCodeIndex++], "S0\n");
+        
+            sprintf(gCodeCommand[gCodeIndex++], "G0 X%d Y%d\n", xScaled, yScaled);
+        }
+        else if (penStatus == 1) // Pen down
+        {
+            sprintf(gCodeCommand[gCodeIndex++], "S1000\n");
+            
+            sprintf(gCodeCommand[gCodeIndex++], "G1 X%d Y%d\n", xScaled, yScaled);
+        }
+
+        if (i % 3 == 0)
+        {
+            xOffset = xOffset + charSpace;
+        }
+
+        if (xOffset > 100)
+        {
+            xOffset = 0;
+            yOffset = yOffset + lineSpace;
+        }
+
+    }
+
+    sprintf(gCodeCommand[gCodeIndex], "G0 X0 Y0\n");  // Return to origin
+    
+    return 0;
+
 }
