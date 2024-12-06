@@ -65,17 +65,16 @@ int main()
 
     printf("Text data mapped to font data successfully.\n");
     
-    
-    printTextFontData(textFontData, 100);
+    //printTextFontData(textFontData, 100);
 
     char *gCodeCommand[1024];  // Array to hold G-code strings
-    for (int i = 0; i < 1024; i++) 
-    {
-        gCodeCommand[i] = malloc(100);
+    for (int i = 0; i < 1024; i++) {
+        gCodeCommand[i] = malloc(100);  // Allocate memory for each command
         if (!gCodeCommand[i]) {
             printf("Memory allocation failed for gCodeCommand[%d]\n", i);
             return 1;
         }
+        gCodeCommand[i][0] = '\0';  // Initialize with an empty string
     }
 
     // Generate G-codes
@@ -86,14 +85,6 @@ int main()
     }
 
     printf("G-code generation completed.\n");
-
-    // Send G-codes to the robot
-    for (int i = 0; gCodeCommand[i] != NULL; i++) 
-    {
-        printf("Sending G-code: %s", gCodeCommand[i]);
-        SendCommands(gCodeCommand[i]);
-        free(gCodeCommand[i]);  // Free allocated memory
-    }
 
     // If we cannot open the port then give up immediately
     if ( CanRS232PortBeOpened() == -1 )
@@ -125,25 +116,21 @@ int main()
     SendCommands(buffer);
 
 
-    // These are sample commands to draw out some information - these are the ones you will be generating.
-    sprintf (buffer, "G0 X-13.41849 Y0.000\n");
-    SendCommands(buffer);
-    sprintf (buffer, "S1000\n");
-    SendCommands(buffer);
-    sprintf (buffer, "G1 X-13.41849 Y-4.28041\n");
-    SendCommands(buffer);
-    sprintf (buffer, "G1 X-13.41849 Y0.0000\n");
-    SendCommands(buffer);
-    sprintf (buffer, "G1 X-13.41089 Y4.28041\n");
-    SendCommands(buffer);
-    sprintf (buffer, "S0\n");
-    SendCommands(buffer);
-    sprintf (buffer, "G0 X-7.17524 Y0\n");
-    SendCommands(buffer);
-    sprintf (buffer, "S1000\n");
-    SendCommands(buffer);
-    sprintf (buffer, "G0 X0 Y0\n");
-    SendCommands(buffer);
+    // Send G-codes to the robot
+    //char buffer[100];  // Buffer to hold the formatted G-code command
+    for (int i = 0; gCodeCommand[i] != NULL; i++) 
+    {
+        printf("Sending G-code: %s", gCodeCommand[i]);
+
+        // Transfer info from gCodeCommand[] to sprintf() with buffer
+        sprintf(buffer, "%s", gCodeCommand[i]);
+
+        // Send the formatted G-code command to the robot
+        SendCommands(buffer);
+
+        // Free the allocated memory after sending the command
+        free(gCodeCommand[i]);
+    }
 
     // Before we exit the program we need to close the COM port
     CloseRS232Port();
@@ -238,6 +225,7 @@ int mapTextToFontData(char textData[], fontValue fontData[], fontValue textFontD
     int ascii;
 
     float xOffset = 0.0;  // Track X offset for characters
+    float yOffset = 0.0;  // Track Y offset (for moving to the next line)
     float charSpace = userHeight;  // Space between characters
 
     // Initialize textFontData to a terminating value
@@ -259,19 +247,36 @@ int mapTextToFontData(char textData[], fontValue fontData[], fontValue textFontD
             if (fontData[j].value1 == 999 && fontData[j].value2 == ascii) 
             {
                 totalStrokes = fontData[j].value3;  // Number of strokes for this character
-                
-                // Copy font data for this character
+                //printf("Character '%c' (ASCII: %d) mapped to %d strokes with offset %.3f\n", textData[i], ascii, totalStrokes, xOffset);
+
+                // Apply xOffset to all strokes for the current character
                 for (int k = 0; k < totalStrokes; k++) 
                 {
                     textFontData[textIndex] = fontData[j + k + 1];  // Copy the stroke data
+
+                    // Apply xOffset to the x values of each stroke
+                    textFontData[textIndex].value1 += xOffset;
+                    // Apply yOffset to the y values of each stroke
+                    textFontData[textIndex].value2 -= 2*yOffset;
+
                     textIndex++;  // Increment the textFontData index
                     strokesProcessed++;  // Increment stroke count
                 }
 
-                // Once all strokes for the character are processed, apply the offset
+                // Once all strokes for the current character are processed, 
+                // update xOffset for the next character.
                 if (strokesProcessed == totalStrokes) 
                 {
                     xOffset += charSpace;  // Move to the next character space
+                    
+                    // If xOffset exceeds the threshold, move to the next line
+                    if (xOffset > 100) 
+                    {
+                        yOffset += userHeight + 5;  // Move down by userHeight + 5
+                        xOffset = 0;  // Reset xOffset to start from the beginning of the new line
+                    }
+
+                    strokesProcessed = 0;  // Reset strokesProcessed for the next character
                 }
 
                 break;  // Stop searching once we find the font data for the character
@@ -282,6 +287,7 @@ int mapTextToFontData(char textData[], fontValue fontData[], fontValue textFontD
     return 0;
 }
 
+
 int generateGCode(fontValue textFontData[], float scaleFactor, char *gCodeCommand[]) 
 {
     int gCodeIndex = 0;
@@ -291,11 +297,19 @@ int generateGCode(fontValue textFontData[], float scaleFactor, char *gCodeComman
     // Loop through all font data for the text
     for (int i = 0; textFontData[i].value1 != -1; i++) 
     {
+        if (gCodeIndex >= 1024) 
+        {
+            printf("Error: G-code command array is full.\n");
+            return 1;  // Exit if the array is full
+        }
+
         int xValue = textFontData[i].value1;
         int yValue = textFontData[i].value2;
         int penStatus = textFontData[i].value3;
         float xScaled = xValue * scaleFactor;
         float yScaled = yValue * scaleFactor;
+
+        //printf("About to generate G-code[%d]: penStatus=%d, xScaled=%.3f, yScaled=%.3f\n", gCodeIndex, penStatus, xScaled, yScaled);
 
         // If the pen status is different from the last one, output the corresponding command
         if (penStatus != lastPenStatus) 
@@ -315,10 +329,12 @@ int generateGCode(fontValue textFontData[], float scaleFactor, char *gCodeComman
         if (penStatus == 0) 
         {  
             sprintf(gCodeCommand[gCodeIndex++], "G0 X%.3f Y%.3f\n", xScaled, yScaled);
+            //printf("G0 has succeeded\n");
         } 
         else if (penStatus == 1) 
         {  
             sprintf(gCodeCommand[gCodeIndex++], "G1 X%.3f Y%.3f\n", xScaled, yScaled);
+            //printf("G1 has succeeded\n");
         }
 
     }
