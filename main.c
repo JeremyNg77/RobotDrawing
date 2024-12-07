@@ -16,9 +16,9 @@ typedef struct {
 
 void SendCommands(char *buffer );
 int readFontData(fontValue fontData[]);
-int readTextData(char textData[]);
+int readTextData(char textData[][256], int *numLines);
 int calculateScaleFactor(float *scaleFactor, float *userHeight);
-int mapTextToFontData(char textData[], fontValue fontData[], fontValue textFontData[], float userHeight);
+int mapTextToFontData(char textData[], fontValue fontData[], fontValue textFontData[], float userHeight, float *currentYOffset);
 int generateGCode(fontValue textFontData[], float scaleFactor, char *gCodeCommand[]);
 void printTextFontData(fontValue textFontData[], int maxSize);
 
@@ -28,7 +28,8 @@ int main()
     char buffer[100];
 
     fontValue fontData[NumberOfLines];
-    char textData[256];
+    char textData[1024][256];  // 2D array to hold multiple lines of text
+    int numLines;  // Total number of lines read
     float scaleFactor;
     float userHeight;
     fontValue textFontData[1024];
@@ -41,7 +42,7 @@ int main()
     }
 
     // Load text data 
-    if (readTextData(textData)) 
+    if (readTextData(textData, &numLines)) 
     {
         printf("Error: Text data could not be loaded.\n");
         return 1;
@@ -56,19 +57,8 @@ int main()
 
     printf("Scale factor calculated: %.2f\n", scaleFactor);
 
-    // Map the text data to font data
-    if (mapTextToFontData(textData, fontData, textFontData, userHeight)) 
-    {
-        printf("Error: Failed to map text data to font data.\n");
-        return 1;
-    }
-
-    printf("Text data mapped to font data successfully.\n");
-    
-    //printTextFontData(textFontData, 100);
-
-    char *gCodeCommand[1024];  // Array to hold G-code strings
-    for (int i = 0; i < 1024; i++) {
+    char *gCodeCommand[4096];  // Array to hold G-code strings
+    for (int i = 0; i < 4096; i++) {
         gCodeCommand[i] = malloc(100);  // Allocate memory for each command
         if (!gCodeCommand[i]) {
             printf("Memory allocation failed for gCodeCommand[%d]\n", i);
@@ -76,15 +66,6 @@ int main()
         }
         gCodeCommand[i][0] = '\0';  // Initialize with an empty string
     }
-
-    // Generate G-codes
-    if (generateGCode(textFontData, scaleFactor, gCodeCommand)) 
-    {
-        printf("Error: Failed to generate G-code.\n");
-        return 1;
-    }
-
-    printf("G-code generation completed.\n");
 
     // If we cannot open the port then give up immediately
     if ( CanRS232PortBeOpened() == -1 )
@@ -118,6 +99,41 @@ int main()
 
     // Send G-codes to the robot
     //char buffer[100];  // Buffer to hold the formatted G-code command
+    float currentYOffset = 0.0;
+
+    for (int i = 0; i < numLines; i++) 
+    {
+        printf("Processing line %d: %s\n", i + 1, textData[i]);
+
+        // Map the text data to font data for the current line
+        if (mapTextToFontData(textData[i], fontData, textFontData, userHeight, &currentYOffset)) 
+        {
+            printf("Error: Failed to map text data to font data for line %d.\n", i + 1);
+            return 1;
+        }
+
+        currentYOffset=currentYOffset-23;
+
+        // Generate G-codes for the current line
+        if (generateGCode(textFontData, scaleFactor, gCodeCommand)) 
+        {
+            printf("Error: Failed to generate G-code for line %d.\n", i + 1);
+            return 1;
+        }
+
+        // Send G-codes for the current line
+        for (int j = 0; gCodeCommand[j] != NULL; j++) 
+        {
+            //printf("%s", gCodeCommand[j]);
+            sprintf(buffer, "%s", gCodeCommand[j]);
+            SendCommands(buffer);
+            gCodeCommand[j][0] = '\0';  // Reset string 
+           
+        }
+        
+    }
+
+/*
     for (int i = 0; gCodeCommand[i] != NULL; i++) 
     {
         printf("Sending G-code: %s", gCodeCommand[i]);
@@ -131,6 +147,7 @@ int main()
         // Free the allocated memory after sending the command
         free(gCodeCommand[i]);
     }
+*/
 
     // Before we exit the program we need to close the COM port
     CloseRS232Port();
@@ -179,29 +196,32 @@ int readFontData(fontValue fontData[])
 
 }
 
-int readTextData(char textData[])
+int readTextData(char textData[][256], int *numLines) 
 {
-    FILE *textDataFile = fopen("test.txt","r");
+    FILE *textDataFile = fopen("RobotTesting.txt", "r");
 
     if (textDataFile == NULL) 
     {
         printf("Error: Unable to open text data file.\n");
         return 1; // Failure
-    }   
+    }
 
-    if (fgets(textData, 256, textDataFile)) 
+    *numLines = 0;  // Initialize the line counter
+
+    // Read each line into the textData array
+    while (fgets(textData[*numLines], 256, textDataFile) && *numLines < 1024) 
     {
-        textData[strcspn(textData, "\n")] = '\0'; // Remove trailing newline character
-        fclose(textDataFile);
-        printf("Text data loaded successfully: %s\n", textData);
-        return 0;
+        textData[*numLines][strcspn(textData[*numLines], "\n")] = '\0'; // Remove trailing newline
+        printf("Loaded line %d: %s\n", *numLines, textData[*numLines]);
+        (*numLines)++;  // Increment line counter
     }
 
     fclose(textDataFile);
 
-    return 1;
+    printf("Text data loaded successfully. Total lines: %d\n", *numLines);
 
-}  
+    return 0;
+}
 
 int calculateScaleFactor(float *scaleFactor, float *userHeight)
 {
@@ -219,13 +239,13 @@ int calculateScaleFactor(float *scaleFactor, float *userHeight)
     return 0;
 }
 
-int mapTextToFontData(char textData[], fontValue fontData[], fontValue textFontData[], float userHeight) 
+int mapTextToFontData(char textData[], fontValue fontData[], fontValue textFontData[], float userHeight, float *currentYOffset) 
 {
     int textIndex = 0;  // Track the current index in textFontData
     int ascii;
 
     float xOffset = 0.0;  // Track X offset for characters
-    float yOffset = 0.0;  // Track Y offset (for moving to the next line)
+    float yOffset = *currentYOffset;  // Track Y offset (for moving to the next line)
     float charSpace = userHeight;  // Space between characters
 
     // Initialize textFontData to a terminating value
@@ -241,41 +261,50 @@ int mapTextToFontData(char textData[], fontValue fontData[], fontValue textFontD
         int totalStrokes = 0;  // Number of strokes for this character
         int strokesProcessed = 0;  // Count of strokes processed for the current character
         
+        
+        if (textData[i] == '\n') 
+        {
+            printf("Newline encountered: Moving to next line.\n");
+            yOffset += 2 * userHeight + 5;  // Move down by userHeight + 5 for a new line
+            xOffset = 0;  // Reset xOffset to start from the beginning of the new line
+            continue;  // Skip to the next character, no further processing for '\n'
+        }
+        
+
+        // Check if xOffset exceeds the threshold and move to the next line only after a word is completed
+        if (xOffset > 100 && textData[i] == ' ') 
+        {
+            yOffset -= 2 * userHeight + 5;  // Move down by userHeight + 5
+            xOffset = 0;  // Reset xOffset to start from the beginning of the new line
+            
+        }
+
         // Search for the corresponding font data for this character
         for (int j = 0; j < NumberOfLines; j++) 
         {
             if (fontData[j].value1 == 999 && fontData[j].value2 == ascii) 
             {
                 totalStrokes = fontData[j].value3;  // Number of strokes for this character
-                //printf("Character '%c' (ASCII: %d) mapped to %d strokes with offset %.3f\n", textData[i], ascii, totalStrokes, xOffset);
+                //printf("Character '%c' (ASCII: %d) mapped to %d strokes with offset X=%.3f, Y=%.3f\n", textData[i], ascii, totalStrokes, xOffset, yOffset);
 
-                // Apply xOffset to all strokes for the current character
+                // Apply xOffset and yOffset to all strokes for the current character
                 for (int k = 0; k < totalStrokes; k++) 
                 {
                     textFontData[textIndex] = fontData[j + k + 1];  // Copy the stroke data
 
-                    // Apply xOffset to the x values of each stroke
+                    // Apply offsets to the x and y values of each stroke
                     textFontData[textIndex].value1 += xOffset;
-                    // Apply yOffset to the y values of each stroke
-                    textFontData[textIndex].value2 -= 2*yOffset;
+                    textFontData[textIndex].value2 += yOffset;
 
                     textIndex++;  // Increment the textFontData index
                     strokesProcessed++;  // Increment stroke count
                 }
 
                 // Once all strokes for the current character are processed, 
-                // update xOffset for the next character.
+                // update xOffset for the next character
                 if (strokesProcessed == totalStrokes) 
                 {
-                    xOffset += charSpace;  // Move to the next character space
-                    
-                    // If xOffset exceeds the threshold, move to the next line
-                    if (xOffset > 100) 
-                    {
-                        yOffset += userHeight + 5;  // Move down by userHeight + 5
-                        xOffset = 0;  // Reset xOffset to start from the beginning of the new line
-                    }
-
+                    xOffset += 2*charSpace;  // Move to the next character space
                     strokesProcessed = 0;  // Reset strokesProcessed for the next character
                 }
 
@@ -283,10 +312,11 @@ int mapTextToFontData(char textData[], fontValue fontData[], fontValue textFontD
             }
         }
     }
+    
+    *currentYOffset = yOffset;
 
     return 0;
 }
-
 
 int generateGCode(fontValue textFontData[], float scaleFactor, char *gCodeCommand[]) 
 {
@@ -329,11 +359,13 @@ int generateGCode(fontValue textFontData[], float scaleFactor, char *gCodeComman
         if (penStatus == 0) 
         {  
             sprintf(gCodeCommand[gCodeIndex++], "G0 X%.3f Y%.3f\n", xScaled, yScaled);
+            //printf("%s", gCodeCommand[gCodeIndex]);
             //printf("G0 has succeeded\n");
         } 
         else if (penStatus == 1) 
         {  
             sprintf(gCodeCommand[gCodeIndex++], "G1 X%.3f Y%.3f\n", xScaled, yScaled);
+            //printf("%s", gCodeCommand[gCodeIndex]);
             //printf("G1 has succeeded\n");
         }
 
