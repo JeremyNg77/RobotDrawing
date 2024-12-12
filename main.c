@@ -330,11 +330,11 @@ void sendGCode(fontValue textFontData[], float scaleFactor)
         {
             if (penStatus == 1) 
             {
-                sprintf(gCodeBuffer, "S1000\n"); // Pen down
+                sprintf(gCodeBuffer, "S1000"); // Pen down
             } 
             else 
             {
-                sprintf(gCodeBuffer, "S0\n");    // Pen up
+                sprintf(gCodeBuffer, "S0");    // Pen up
             }
             SendCommands(gCodeBuffer);
             lastPenStatus = penStatus;
@@ -343,11 +343,11 @@ void sendGCode(fontValue textFontData[], float scaleFactor)
         // Generate G0 or G1 command depending on the pen status
         if (penStatus == 0) 
         {
-            sprintf(gCodeBuffer, "G0 X%.3f Y%.3f\n", xScaled, yScaled);
+            sprintf(gCodeBuffer, "G0 X%.3f Y%.3f", xScaled, yScaled);
         } 
         else 
         {
-            sprintf(gCodeBuffer, "G1 X%.3f Y%.3f\n", xScaled, yScaled);
+            sprintf(gCodeBuffer, "G1 X%.3f Y%.3f", xScaled, yScaled);
         }
         SendCommands(gCodeBuffer);
     }
